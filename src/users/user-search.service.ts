@@ -2,7 +2,7 @@
 import { Injectable } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import type { estypes } from '@elastic/elasticsearch';
-import { User } from '@prisma/client';
+import { Role, TeamRole, User } from '@prisma/client';
 import { UserSearchDto } from './dto/user-search.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -64,25 +64,19 @@ export class UserSearchService {
 
     const must: estypes.QueryDslQueryContainer[] = [];
 
-    // 🔎 Name/email prefix search (case-insensitive)
+    // 🔍 Name/email prefix search
     if (q) {
       must.push({
         bool: {
           should: [
             {
               prefix: {
-                name: {
-                  value: q.toLowerCase(),
-                  case_insensitive: true,
-                },
+                name: { value: q.toLowerCase(), case_insensitive: true },
               },
             },
             {
               prefix: {
-                email: {
-                  value: q.toLowerCase(),
-                  case_insensitive: true,
-                },
+                email: { value: q.toLowerCase(), case_insensitive: true },
               },
             },
           ],
@@ -90,7 +84,7 @@ export class UserSearchService {
       });
     }
 
-    // 🚧 Invite status filter via DB
+    // 🧊 Invite status filter (via DB)
     if (inviteStatus) {
       const invites = await this.prismaService.invite.findMany({
         where: {
@@ -113,7 +107,7 @@ export class UserSearchService {
       });
     }
 
-    // 🧭 Sorting logic
+    // 🧭 Sorting
     const sortField =
       sortBy === 'name' || sortBy === 'email' ? `${sortBy}.keyword` : sortBy;
 
@@ -133,6 +127,7 @@ export class UserSearchService {
     // 🧭 Cursor decoding
     if (nextCursor) {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const decoded = JSON.parse(
           Buffer.from(nextCursor, 'base64').toString(),
         );
@@ -148,8 +143,8 @@ export class UserSearchService {
       }
     }
 
+    // 🔎 Search in Elasticsearch
     const result = await this.elasticsearchService.search<UserDoc>(params);
-
     const hits = result.hits.hits;
     const total =
       typeof result.hits.total === 'object' ? result.hits.total.value : 0;
@@ -159,10 +154,73 @@ export class UserSearchService {
       .map((h) => h._source)
       .filter((s): s is UserDoc => Boolean(s));
 
+    const userIds = users.map((u) => u.id);
+
+    // 🔗 Enrich with org data
+    const orgMemberships = await this.prismaService.userOrganization.findMany({
+      where: { userId: { in: userIds } },
+      select: {
+        userId: true,
+        role: true,
+        organizationId: true,
+        organization: { select: { name: true } },
+      },
+    });
+
+    const orgMap: Record<
+      number,
+      { orgId: number; name: string; role: Role }[]
+    > = {};
+    for (const m of orgMemberships) {
+      if (!orgMap[m.userId]) orgMap[m.userId] = [];
+      orgMap[m.userId].push({
+        orgId: m.organizationId,
+        name: m.organization.name,
+        role: m.role,
+      });
+    }
+
+    // 🔗 Enrich with team data
+    const teamMemberships = await this.prismaService.teamMember.findMany({
+      where: { userId: { in: userIds } },
+      select: {
+        userId: true,
+        teamId: true,
+        role: true,
+        team: {
+          select: {
+            name: true,
+            organizationId: true,
+          },
+        },
+      },
+    });
+
+    const teamMap: Record<
+      number,
+      { teamId: number; name: string; role: TeamRole; orgId: number }[]
+    > = {};
+    for (const m of teamMemberships) {
+      if (!teamMap[m.userId]) teamMap[m.userId] = [];
+      teamMap[m.userId].push({
+        teamId: m.teamId,
+        name: m.team.name,
+        role: m.role,
+        orgId: m.team.organizationId,
+      });
+    }
+
+    // ✅ Merge user with org and team info
+    const enrichedUsers = users.map((u) => ({
+      ...u,
+      orgs: orgMap[u.id] ?? [],
+      teams: teamMap[u.id] ?? [],
+    }));
+
     const lastHit = hits[hits.length - 1];
 
     return {
-      users,
+      users: enrichedUsers,
       nextCursor:
         hasMore && lastHit.sort?.length
           ? Buffer.from(JSON.stringify(lastHit.sort)).toString('base64')
