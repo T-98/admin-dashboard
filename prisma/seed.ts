@@ -34,16 +34,18 @@ async function main() {
           name: {
             type: 'text',
             fields: {
-              keyword: { type: 'keyword' }, // 👈 this enables sorting
+              keyword: { type: 'keyword' },
             },
           },
           email: {
             type: 'text',
             fields: {
-              keyword: { type: 'keyword' }, // 👈 same for email if needed
+              keyword: { type: 'keyword' },
             },
           },
           createdAt: { type: 'date' },
+          organizationIds: { type: 'integer' },
+          teamIds: { type: 'integer' },
         },
       },
     },
@@ -104,20 +106,9 @@ async function main() {
 
     users.push(user);
 
-    await es.index({
-      index: 'users',
-      id: user.id.toString(),
-      document: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        createdAt: user.createdAt.toISOString(),
-      },
-    });
-  }
+    const userOrgIds: number[] = [];
+    const userTeamIds: number[] = [];
 
-  // Assign users to orgs, teams, and invites
-  for (const user of users) {
     const orgSample = faker.helpers.arrayElements(
       orgs,
       faker.number.int({ min: 1, max: 3 }),
@@ -136,6 +127,8 @@ async function main() {
         },
       });
 
+      userOrgIds.push(org.id);
+
       const orgTeams = teams.filter((t) => t.organizationId === org.id);
       const teamSample = faker.helpers.arrayElements(
         orgTeams,
@@ -150,6 +143,8 @@ async function main() {
             role: faker.helpers.arrayElement([TeamRole.LEAD, TeamRole.MEMBER]),
           },
         });
+
+        userTeamIds.push(team.id);
 
         await prisma.invite.create({
           data: {
@@ -168,6 +163,19 @@ async function main() {
         });
       }
     }
+
+    await es.index({
+      index: 'users',
+      id: user.id.toString(),
+      document: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt.toISOString(),
+        organizationIds: userOrgIds,
+        teamIds: userTeamIds,
+      },
+    });
   }
 
   console.log('✅ Seed complete: Users, orgs, teams, invites, and ES indexed!');

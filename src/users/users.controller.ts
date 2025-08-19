@@ -54,27 +54,28 @@ export class UsersController {
 
     return this.usersService.deleteUserFromOrg(requester.id, userId, orgId);
   }
+
   @Get('search')
   async searchUsers(
     @Query() query: UserSearchDto,
     @Headers('x-email') email: string,
     @Headers('x-password') password: string,
   ) {
-    if (!email || !password)
+    if (!email || !password) {
       throw new UnauthorizedException('Missing credentials');
+    }
 
-    // 👮 Authenticate
     await authenticateUser(this.prismaService, email, password);
 
-    // 🔎 Get user by email
     const user = await this.prismaService.user.findUnique({
       where: { email },
       select: { id: true },
     });
 
-    if (!user) throw new UnauthorizedException('User not found');
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
 
-    // 🔁 Pass userId to searchUsers
     return this.userSearchService.searchUsers(query);
   }
 }

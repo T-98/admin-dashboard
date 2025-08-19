@@ -25,7 +25,7 @@ export class UsersService {
         password: hashed,
       },
     });
-    await this.userSearchService.indexUser(user);
+    await this.userSearchService.indexUser(user.id);
     return user;
   }
 

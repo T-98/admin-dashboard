@@ -30,7 +30,33 @@ export class UserSearchService {
     }
   }
 
-  async indexUser(user: User) {
+  async indexUser(userId: number) {
+    // Fetch base user data
+    const user = await this.prismaService.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) return;
+
+    // Fetch associated organization IDs
+    const userOrgs = await this.prismaService.userOrganization.findMany({
+      where: { userId },
+      select: { organizationId: true },
+    });
+
+    const organizationIds = userOrgs.map((o) => o.organizationId);
+
+    // Fetch associated team IDs
+    const userTeams = await this.prismaService.teamMember.findMany({
+      where: { userId },
+      select: {
+        teamId: true,
+        team: { select: { organizationId: true } },
+      },
+    });
+
+    const teamIds = userTeams.map((t) => t.teamId);
+
     await this.elasticsearchService.index({
       index: 'users',
       id: user.id.toString(),
@@ -39,6 +65,8 @@ export class UserSearchService {
         name: user.name,
         email: user.email,
         createdAt: user.createdAt.toISOString(),
+        organizationIds,
+        teamIds,
       },
     });
   }
@@ -58,6 +86,8 @@ export class UserSearchService {
       take = '10',
       inviteStatus,
       nextCursor,
+      organizationId,
+      teamId,
     } = dto;
 
     const size = typeof take === 'string' ? parseInt(take, 10) : take;
@@ -104,6 +134,24 @@ export class UserSearchService {
 
       must.push({
         terms: { id: invitedUserIds },
+      });
+    }
+
+    // 🏢 Filter by organizationId
+    if (organizationId) {
+      must.push({
+        terms: {
+          organizationIds: [organizationId],
+        },
+      });
+    }
+
+    // 👥 Filter by teamId
+    if (teamId) {
+      must.push({
+        terms: {
+          teamIds: [teamId],
+        },
       });
     }
 
