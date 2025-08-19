@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+  output = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+}
+
+/// Enums
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum TeamRole {
+  LEAD
+  MEMBER
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+}
+
+/// User
+model User {
+  id                Int                  @id @default(autoincrement())
+  email             String               @unique
+  password          String
+  name              String
+  createdAt         DateTime             @default(now())
+
+  userOrganizations UserOrganization[]
+  teamMembers       TeamMember[]
+  invitesReceived       Invite[]             @relation("UserInvites")
+}
+
+/// Organization
+model Organization {
+  id                Int                  @id @default(autoincrement())
+  name              String
+  createdAt         DateTime             @default(now())
+
+  userOrganizations UserOrganization[]
+  teams             Team[]
+  invites           Invite[]             @relation("InviteOrg")
+}
+
+/// User ↔ Organization (with org-level role)
+model UserOrganization {
+  id              Int          @id @default(autoincrement())
+  userId          Int
+  organizationId  Int
+  role            Role
+
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+/// Team within an organization
+model Team {
+  id              Int          @id @default(autoincrement())
+  name            String
+  organizationId  Int
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  teamMembers     TeamMember[]
+  invites         Invite[]     @relation("InviteTeam")
+
+  @@unique([id, organizationId])
+}
+
+/// Team membership (with team-level role)
+model TeamMember {
+  id       Int       @id @default(autoincrement())
+  userId   Int
+  teamId   Int
+  role     TeamRole  @default(MEMBER)
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team     Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
+}
+
+/// Invites (org-level or team-level)
+model Invite {
+  id             Int          @id @default(autoincrement())
+  email          String
+  orgRole        Role
+  teamRole       TeamRole?
+  status         InviteStatus @default(PENDING)
+  createdAt      DateTime     @default(now())
+  acceptedAt     DateTime?
+  invitedUserId    Int?
+  organizationId Int
+  teamId         Int?
+
+  invitedUser      User?        @relation("UserInvites", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  organization   Organization @relation("InviteOrg", fields: [organizationId], references: [id], onDelete: Cascade)
+  team           Team?        @relation("InviteTeam", fields: [teamId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@index([email, organizationId, teamId])
+}
