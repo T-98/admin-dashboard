@@ -6,6 +6,9 @@ import {
   Query,
   Headers,
   UnauthorizedException,
+  Delete,
+  Param,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -28,6 +31,29 @@ export class UsersController {
     return await this.usersService.create(createUserDto);
   }
 
+  /**
+   * DELETE /api/users/:userId/org/:orgId
+   * Allows an ADMIN or OWNER to delete a user within their shared org.
+   */
+  @Delete(':userId/org/:orgId')
+  async deleteUserFromOrg(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Param('orgId', ParseIntPipe) orgId: number,
+    @Headers('x-email') email: string,
+    @Headers('x-password') password: string,
+  ) {
+    if (!email || !password) {
+      throw new UnauthorizedException('Missing credentials');
+    }
+
+    const requester = await authenticateUser(
+      this.prismaService,
+      email,
+      password,
+    );
+
+    return this.usersService.deleteUserFromOrg(requester.id, userId, orgId);
+  }
   @Get('search')
   async searchUsers(
     @Query() query: UserSearchDto,

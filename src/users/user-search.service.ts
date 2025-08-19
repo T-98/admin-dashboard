@@ -43,6 +43,13 @@ export class UserSearchService {
     });
   }
 
+  async removeUser(userId: number) {
+    await this.elasticsearchService.delete({
+      index: 'users',
+      id: userId.toString(),
+    });
+  }
+
   async searchUsers(dto: UserSearchDto) {
     const {
       q,
