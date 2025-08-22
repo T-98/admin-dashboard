@@ -2,7 +2,7 @@
 import { Injectable } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import type { estypes } from '@elastic/elasticsearch';
-import { Role, TeamRole, User } from '@prisma/client';
+import { Role, TeamRole } from '@prisma/client';
 import { UserSearchDto } from './dto/user-search.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -85,7 +85,7 @@ export class UserSearchService {
       order = 'desc',
       take = '10',
       inviteStatus,
-      nextCursor,
+      nextCursor: encodedCursor,
       organizationId,
       teamId,
     } = dto;
@@ -173,11 +173,11 @@ export class UserSearchService {
     };
 
     // 🧭 Cursor decoding
-    if (nextCursor) {
+    if (encodedCursor) {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const decoded = JSON.parse(
-          Buffer.from(nextCursor, 'base64').toString(),
+          Buffer.from(encodedCursor, 'base64').toString(),
         );
         if (Array.isArray(decoded)) {
           (
@@ -196,7 +196,6 @@ export class UserSearchService {
     const hits = result.hits.hits;
     const total =
       typeof result.hits.total === 'object' ? result.hits.total.value : 0;
-    const hasMore = hits.length === size;
 
     const users: UserDoc[] = hits
       .map((h) => h._source)
@@ -267,13 +266,18 @@ export class UserSearchService {
 
     const lastHit = hits[hits.length - 1];
 
+    // Only return nextCursor if there is another *actual* page worth of results
+    const nextCursor =
+      hits.length > 0 &&
+      lastHit?.sort?.length &&
+      users.length + (encodedCursor ? size : 0) < total
+        ? Buffer.from(JSON.stringify(lastHit.sort)).toString('base64')
+        : null;
+
     return {
       users: enrichedUsers,
-      nextCursor:
-        hasMore && lastHit.sort?.length
-          ? Buffer.from(JSON.stringify(lastHit.sort)).toString('base64')
-          : null,
-      hasMore,
+      nextCursor,
+      hasMore: !!nextCursor,
       total,
     };
   }

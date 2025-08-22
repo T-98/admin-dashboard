@@ -10,7 +10,31 @@ import { AcceptInviteDto } from './dto/invite-accept.dto';
 
 @Injectable()
 export class InvitesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) {}
+
+  async getInvitesForUsers(userIdsCsv: string) {
+    const userIds = userIdsCsv
+      .split(',')
+      .map((id) => parseInt(id, 10))
+      .filter((id) => !isNaN(id));
+
+    if (userIds.length === 0) return [];
+
+    const invites = await this.prismaService.invite.findMany({
+      where: {
+        invitedUserId: { in: userIds },
+      },
+      select: {
+        invitedUserId: true,
+        organizationId: true,
+        status: true,
+        teamId: true,
+        createdAt: true,
+      },
+    });
+
+    return invites;
+  }
 
   async createInvite(requesterId: number, createInviteDto: CreateInviteDto) {
     const {
@@ -24,7 +48,7 @@ export class InvitesService {
     } = createInviteDto;
 
     // ✅ Step 1: Ensure the requester is authorized (ADMIN or OWNER in the organization)
-    const requesterOrg = await this.prisma.userOrganization.findFirst({
+    const requesterOrg = await this.prismaService.userOrganization.findFirst({
       where: {
         userId: requesterId,
         organizationId,
@@ -41,7 +65,7 @@ export class InvitesService {
     // ✅ Step 2: If it's a team invite, validate that the team belongs to the organization
     // and the invitee is already a member of that organization
     if (teamId && teamRole) {
-      const team = await this.prisma.team.findUnique({
+      const team = await this.prismaService.team.findUnique({
         where: { id: teamId },
       });
 
@@ -53,12 +77,13 @@ export class InvitesService {
       }
 
       // Enforce: Invitee must already be part of the org to receive a team invite
-      const invitedUserOrg = await this.prisma.userOrganization.findFirst({
-        where: {
-          userId: invitedUserId,
-          organizationId,
-        },
-      });
+      const invitedUserOrg =
+        await this.prismaService.userOrganization.findFirst({
+          where: {
+            userId: invitedUserId,
+            organizationId,
+          },
+        });
 
       if (!invitedUserOrg) {
         throw new ForbiddenException(
@@ -68,7 +93,7 @@ export class InvitesService {
     }
 
     // ✅ Step 3: Prevent duplicate PENDING invites to the same org or team
-    const existingInvite = await this.prisma.invite.findFirst({
+    const existingInvite = await this.prismaService.invite.findFirst({
       where: {
         email,
         organizationId,
@@ -85,7 +110,7 @@ export class InvitesService {
 
     // ✅ Step 4: Create the invite
     // This supports both org-level and team-level invites based on presence of teamId/teamRole
-    return this.prisma.invite.create({
+    return this.prismaService.invite.create({
       data: {
         email,
         orgRole,
@@ -98,11 +123,12 @@ export class InvitesService {
     });
   }
 
+  //Update DTO to include inviteID of the invite you want to accept
   async acceptInvite(userId: number, dto: AcceptInviteDto) {
     const { email } = dto;
 
     // Step 1: Look for a pending invite for this email
-    const invite = await this.prisma.invite.findFirst({
+    const invite = await this.prismaService.invite.findFirst({
       where: {
         email,
         status: InviteStatus.PENDING,
@@ -114,7 +140,7 @@ export class InvitesService {
     }
 
     // Step 2: Check if user is already part of the org (prevent duplicate join)
-    const existingOrg = await this.prisma.userOrganization.findFirst({
+    const existingOrg = await this.prismaService.userOrganization.findFirst({
       where: {
         userId,
         organizationId: invite.organizationId,
@@ -123,7 +149,7 @@ export class InvitesService {
 
     if (!existingOrg) {
       // Not part of org yet → add to organization
-      await this.prisma.userOrganization.create({
+      await this.prismaService.userOrganization.create({
         data: {
           userId,
           organizationId: invite.organizationId,
@@ -134,7 +160,7 @@ export class InvitesService {
 
     // Step 3: If it's a team invite → check membership
     if (invite.teamId && invite.teamRole) {
-      const existingTeam = await this.prisma.teamMember.findFirst({
+      const existingTeam = await this.prismaService.teamMember.findFirst({
         where: {
           userId,
           teamId: invite.teamId,
@@ -143,7 +169,7 @@ export class InvitesService {
 
       if (!existingTeam) {
         // Not part of team yet → add to team
-        await this.prisma.teamMember.create({
+        await this.prismaService.teamMember.create({
           data: {
             userId,
             teamId: invite.teamId,
@@ -154,7 +180,7 @@ export class InvitesService {
     }
 
     // Step 4: Mark invite as accepted
-    await this.prisma.invite.update({
+    await this.prismaService.invite.update({
       where: { id: invite.id },
       data: {
         status: InviteStatus.ACCEPTED,

@@ -1,8 +1,10 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Post,
+  Query,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InvitesService } from './invites.service';
@@ -37,7 +39,20 @@ export class InvitesController {
     );
 
     // ✅ Delegate to service
+
     return this.invitesService.createInvite(requester.id, createInviteDto);
+  }
+
+  @Get()
+  async getInvitesForUsers(
+    @Query('userIds') userIdsCsv: string,
+    @Headers('x-email') email: string,
+    @Headers('x-password') password: string,
+  ) {
+    if (!email || !password)
+      throw new UnauthorizedException('Missing credentials');
+    await authenticateUser(this.prismaService, email, password);
+    return this.invitesService.getInvitesForUsers(userIdsCsv);
   }
 
   @Post('accept')
