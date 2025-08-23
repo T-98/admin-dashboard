@@ -7,10 +7,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { Role, InviteStatus } from '@prisma/client';
 import { AcceptInviteDto } from './dto/invite-accept.dto';
+import { UserSearchService } from '../users/user-search.service';
 
 @Injectable()
 export class InvitesService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(
+    private readonly prismaService: PrismaService,
+    private readonly userSearchService: UserSearchService,
+  ) {}
 
   async getInvitesForUsers(userIdsCsv: string) {
     const userIds = userIdsCsv
@@ -188,6 +192,9 @@ export class InvitesService {
         invitedUserId: userId,
       },
     });
+
+    // ✅ Step 5: Re-index the user in Elasticsearch
+    await this.userSearchService.indexUser(userId);
 
     return { message: 'Invite accepted successfully' };
   }

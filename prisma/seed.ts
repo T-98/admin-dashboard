@@ -1,4 +1,3 @@
-/* eslint-disable */
 // prisma/seed.ts
 import { PrismaClient, Role, TeamRole, InviteStatus } from '@prisma/client';
 import { faker } from '@faker-js/faker';
@@ -11,7 +10,6 @@ const es = new ElasticClient({ node: 'http://localhost:9200' });
 async function main() {
   console.log('🚮 Deleting all DB and ES data...');
 
-  // Clear Elasticsearch index
   try {
     await es.indices.delete({ index: 'users' });
     console.log('🧹 Deleted Elasticsearch index "users"');
@@ -24,34 +22,27 @@ async function main() {
     }
   }
 
-  // Recreate index
   await es.indices.create({
     index: 'users',
     body: {
       mappings: {
         properties: {
           id: { type: 'integer' },
-          name: {
-            type: 'text',
-            fields: {
-              keyword: { type: 'keyword' },
-            },
-          },
-          email: {
-            type: 'text',
-            fields: {
-              keyword: { type: 'keyword' },
-            },
-          },
+          name: { type: 'text', fields: { keyword: { type: 'keyword' } } },
+          email: { type: 'text', fields: { keyword: { type: 'keyword' } } },
           createdAt: { type: 'date' },
           organizationIds: { type: 'integer' },
           teamIds: { type: 'integer' },
+          organizationNames: {
+            type: 'text',
+            fields: { keyword: { type: 'keyword' } },
+          },
+          teamNames: { type: 'text', fields: { keyword: { type: 'keyword' } } },
         },
       },
     },
   });
 
-  // Clear Postgres
   await prisma.invite.deleteMany({});
   await prisma.teamMember.deleteMany({});
   await prisma.userOrganization.deleteMany({});
@@ -61,17 +52,13 @@ async function main() {
 
   console.log('🧪 Seeding fresh data...');
 
-  // Create organizations
   const orgs = await Promise.all(
     Array.from({ length: 5 }).map(() =>
-      prisma.organization.create({
-        data: { name: faker.company.name() },
-      }),
+      prisma.organization.create({ data: { name: faker.company.name() } }),
     ),
   );
 
-  // Create teams under each org
-  const teams: { id: number; organizationId: number }[] = [];
+  const teams: { id: number; name: string; organizationId: number }[] = [];
   for (const org of orgs) {
     const orgTeams = await Promise.all(
       Array.from({ length: faker.number.int({ min: 2, max: 5 }) }).map(() =>
@@ -86,7 +73,6 @@ async function main() {
     teams.push(...orgTeams);
   }
 
-  // Create users and index into Elasticsearch
   const users: any[] = [];
   for (let i = 0; i < 100; i++) {
     const plainPassword = 'password123';
@@ -103,11 +89,12 @@ async function main() {
     console.log(
       `Created test user: ${user.email} | password: ${plainPassword}`,
     );
-
     users.push(user);
 
     const userOrgIds: number[] = [];
     const userTeamIds: number[] = [];
+    const userOrgNames: string[] = [];
+    const userTeamNames: string[] = [];
 
     const orgSample = faker.helpers.arrayElements(
       orgs,
@@ -128,6 +115,7 @@ async function main() {
       });
 
       userOrgIds.push(org.id);
+      userOrgNames.push(org.name);
 
       const orgTeams = teams.filter((t) => t.organizationId === org.id);
       const teamSample = faker.helpers.arrayElements(
@@ -145,6 +133,7 @@ async function main() {
         });
 
         userTeamIds.push(team.id);
+        userTeamNames.push(team.name);
 
         await prisma.invite.create({
           data: {
@@ -174,6 +163,8 @@ async function main() {
         createdAt: user.createdAt.toISOString(),
         organizationIds: userOrgIds,
         teamIds: userTeamIds,
+        organizationNames: userOrgNames,
+        teamNames: userTeamNames,
       },
     });
   }

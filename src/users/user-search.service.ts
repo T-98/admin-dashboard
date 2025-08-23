@@ -38,25 +38,31 @@ export class UserSearchService {
 
     if (!user) return;
 
-    // Fetch associated organization IDs
+    // Fetch all org memberships (id + name)
     const userOrgs = await this.prismaService.userOrganization.findMany({
       where: { userId },
-      select: { organizationId: true },
+      select: {
+        organizationId: true,
+        organization: { select: { name: true } },
+      },
     });
 
     const organizationIds = userOrgs.map((o) => o.organizationId);
+    const organizationNames = userOrgs.map((o) => o.organization.name);
 
-    // Fetch associated team IDs
+    // Fetch all team memberships (id + name)
     const userTeams = await this.prismaService.teamMember.findMany({
       where: { userId },
       select: {
         teamId: true,
-        team: { select: { organizationId: true } },
+        team: { select: { name: true } },
       },
     });
 
     const teamIds = userTeams.map((t) => t.teamId);
+    const teamNames = userTeams.map((t) => t.team.name);
 
+    // Index into Elasticsearch
     await this.elasticsearchService.index({
       index: 'users',
       id: user.id.toString(),
@@ -66,7 +72,9 @@ export class UserSearchService {
         email: user.email,
         createdAt: user.createdAt.toISOString(),
         organizationIds,
+        organizationNames,
         teamIds,
+        teamNames,
       },
     });
   }
@@ -86,8 +94,8 @@ export class UserSearchService {
       take = '10',
       inviteStatus,
       nextCursor: encodedCursor,
-      organizationId,
-      teamId,
+      organizationName,
+      teamName,
     } = dto;
 
     const size = typeof take === 'string' ? parseInt(take, 10) : take;
@@ -112,25 +120,23 @@ export class UserSearchService {
         return { users: [], nextCursor: null, hasMore: false, total: 0 };
       }
 
-      must.push({
-        terms: { id: invitedUserIds },
-      });
+      must.push({ terms: { id: invitedUserIds } });
     }
 
-    // 🏢 Filter by organizationId
-    if (organizationId) {
+    // 🏢 Filter by organization name (case-insensitive match)
+    if (organizationName) {
       must.push({
-        terms: {
-          organizationIds: [organizationId],
+        match_phrase_prefix: {
+          organizationNames: organizationName.toLowerCase(),
         },
       });
     }
 
-    // 👥 Filter by teamId
-    if (teamId) {
+    // 👥 Filter by team name (case-insensitive match)
+    if (teamName) {
       must.push({
-        terms: {
-          teamIds: [teamId],
+        match_phrase_prefix: {
+          teamNames: teamName.toLowerCase(),
         },
       });
     }
@@ -140,7 +146,6 @@ export class UserSearchService {
     let sort: estypes.SortCombinations[];
 
     if (q && sortBy === 'mostRelevant') {
-      // ✨ Multi-match scoring across name and email
       query = {
         bool: {
           must: [
@@ -156,10 +161,8 @@ export class UserSearchService {
         },
       };
 
-      // Score-based sort
       sort = [{ _score: { order: 'desc' } }, { id: { order: 'desc' } }];
     } else {
-      // 🧭 Fallback: regular prefix search + field sort
       if (q) {
         must.push({
           bool: {
@@ -194,7 +197,6 @@ export class UserSearchService {
       track_total_hits: true,
     };
 
-    // 🧭 Cursor decoding
     if (encodedCursor) {
       try {
         const decoded = JSON.parse(
@@ -278,7 +280,6 @@ export class UserSearchService {
       });
     }
 
-    // ✅ Merge user with org and team info
     const enrichedUsers = users.map((u) => ({
       ...u,
       orgs: orgMap[u.id] ?? [],
@@ -286,7 +287,6 @@ export class UserSearchService {
     }));
 
     const lastHit = hits[hits.length - 1];
-
     const nextCursor =
       hits.length > 0 &&
       lastHit?.sort?.length &&

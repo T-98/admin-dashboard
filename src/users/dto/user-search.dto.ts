@@ -36,12 +36,10 @@ export class UserSearchDto {
   nextCursor?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  organizationId?: number;
+  @IsString()
+  organizationName?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  teamId?: number;
+  @IsString()
+  teamName?: string;
 }
