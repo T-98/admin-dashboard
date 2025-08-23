@@ -16,8 +16,8 @@ export class UserSearchDto {
   q?: string;
 
   @IsOptional()
-  @IsIn(['createdAt', 'name', 'email'])
-  sortBy?: 'createdAt' | 'name' | 'email';
+  @IsIn(['createdAt', 'name', 'email', 'mostRelevant'])
+  sortBy?: 'createdAt' | 'name' | 'email' | 'mostRelevant';
 
   @IsOptional()
   @IsIn(['asc', 'desc'])

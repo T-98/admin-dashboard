@@ -94,26 +94,6 @@ export class UserSearchService {
 
     const must: estypes.QueryDslQueryContainer[] = [];
 
-    // 🔍 Name/email prefix search
-    if (q) {
-      must.push({
-        bool: {
-          should: [
-            {
-              prefix: {
-                name: { value: q.toLowerCase(), case_insensitive: true },
-              },
-            },
-            {
-              prefix: {
-                email: { value: q.toLowerCase(), case_insensitive: true },
-              },
-            },
-          ],
-        },
-      });
-    }
-
     // 🧊 Invite status filter (via DB)
     if (inviteStatus) {
       const invites = await this.prismaService.invite.findMany({
@@ -155,27 +135,68 @@ export class UserSearchService {
       });
     }
 
-    // 🧭 Sorting
-    const sortField =
-      sortBy === 'name' || sortBy === 'email' ? `${sortBy}.keyword` : sortBy;
+    // 🧭 Query + Sort
+    let query: estypes.QueryDslQueryContainer;
+    let sort: estypes.SortCombinations[];
 
-    const sort: estypes.SortCombinations[] = [
-      { [sortField]: order },
-      { id: order },
-    ];
+    if (q && sortBy === 'mostRelevant') {
+      // ✨ Multi-match scoring across name and email
+      query = {
+        bool: {
+          must: [
+            ...must,
+            {
+              multi_match: {
+                query: q.toLowerCase(),
+                type: 'phrase_prefix',
+                fields: ['name', 'email'],
+              },
+            },
+          ],
+        },
+      };
+
+      // Score-based sort
+      sort = [{ _score: { order: 'desc' } }, { id: { order: 'desc' } }];
+    } else {
+      // 🧭 Fallback: regular prefix search + field sort
+      if (q) {
+        must.push({
+          bool: {
+            should: [
+              {
+                prefix: {
+                  name: { value: q.toLowerCase(), case_insensitive: true },
+                },
+              },
+              {
+                prefix: {
+                  email: { value: q.toLowerCase(), case_insensitive: true },
+                },
+              },
+            ],
+          },
+        });
+      }
+
+      const sortField =
+        sortBy === 'name' || sortBy === 'email' ? `${sortBy}.keyword` : sortBy;
+
+      sort = [{ [sortField]: order }, { id: order }];
+      query = must.length > 0 ? { bool: { must } } : { match_all: {} };
+    }
 
     const params: estypes.SearchRequest = {
       index: 'users',
       size,
       sort,
-      query: must.length > 0 ? { bool: { must } } : { match_all: {} },
+      query,
       track_total_hits: true,
     };
 
     // 🧭 Cursor decoding
     if (encodedCursor) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const decoded = JSON.parse(
           Buffer.from(encodedCursor, 'base64').toString(),
         );
@@ -266,7 +287,6 @@ export class UserSearchService {
 
     const lastHit = hits[hits.length - 1];
 
-    // Only return nextCursor if there is another *actual* page worth of results
     const nextCursor =
       hits.length > 0 &&
       lastHit?.sort?.length &&
