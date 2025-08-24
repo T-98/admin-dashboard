@@ -67,7 +67,9 @@ CREATE TABLE "public"."Invite" (
     "acceptedAt" TIMESTAMP(3),
     "invitedUserId" INTEGER,
     "organizationId" INTEGER NOT NULL,
+    "organizationName" TEXT NOT NULL,
     "teamId" INTEGER,
+    "teamName" TEXT,
 
     CONSTRAINT "Invite_pkey" PRIMARY KEY ("id")
 );

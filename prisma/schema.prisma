@@ -104,8 +104,10 @@ model Invite {
   createdAt      DateTime     @default(now())
   acceptedAt     DateTime?
   invitedUserId    Int?
-  organizationId Int
+  organizationId   Int
+  organizationName String
   teamId         Int?
+  teamName       String?
 
   invitedUser      User?        @relation("UserInvites", fields: [invitedUserId], references: [id], onDelete: Cascade)
   organization   Organization @relation("InviteOrg", fields: [organizationId], references: [id], onDelete: Cascade)

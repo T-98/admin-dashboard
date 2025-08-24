@@ -113,6 +113,23 @@ export class InvitesService {
     }
 
     // ✅ Step 4: Create the invite
+    // 🔍 Fetch names for denormalization
+    const org = await this.prismaService.organization.findUnique({
+      where: { id: organizationId },
+      select: { name: true },
+    });
+
+    if (!org) throw new ForbiddenException('Organization not found');
+
+    let teamName: string | undefined = undefined;
+    if (teamId) {
+      const team = await this.prismaService.team.findUnique({
+        where: { id: teamId },
+        select: { name: true },
+      });
+      if (!team) throw new ForbiddenException('Team not found');
+      teamName = team.name;
+    }
     // This supports both org-level and team-level invites based on presence of teamId/teamRole
     return this.prismaService.invite.create({
       data: {
@@ -122,19 +139,22 @@ export class InvitesService {
         status,
         invitedUserId,
         organizationId,
+        organizationName: org.name,
         teamId,
+        teamName, // can be undefined
       },
     });
   }
 
   //Update DTO to include inviteID of the invite you want to accept
   async acceptInvite(userId: number, dto: AcceptInviteDto) {
-    const { email } = dto;
+    const { email, inviteId } = dto;
 
     // Step 1: Look for a pending invite for this email
     const invite = await this.prismaService.invite.findFirst({
       where: {
         email,
+        id: inviteId,
         status: InviteStatus.PENDING,
       },
     });

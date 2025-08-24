@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsInt, IsOptional } from 'class-validator';
+import { IsEmail, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
 import { Role, TeamRole, InviteStatus } from '@prisma/client';
 
 export class CreateInviteDto {
@@ -23,7 +23,14 @@ export class CreateInviteDto {
   @IsInt()
   organizationId: number;
 
+  @IsString()
+  organizationName: string;
+
   @IsOptional()
   @IsInt()
   teamId?: number;
+
+  @IsOptional()
+  @IsString()
+  teamName?: string;
 }

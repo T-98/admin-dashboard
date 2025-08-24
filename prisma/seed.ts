@@ -14,6 +14,7 @@ async function main() {
     await es.indices.delete({ index: 'users' });
     console.log('🧹 Deleted Elasticsearch index "users"');
   } catch (e: any) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (e.meta?.statusCode !== 404) {
       console.error('❌ Error deleting ES index:', e);
       throw e;
@@ -147,7 +148,9 @@ async function main() {
             ]),
             invitedUserId: user.id,
             organizationId: org.id,
+            organizationName: org.name,
             teamId: team.id,
+            teamName: team.name,
           },
         });
       }
@@ -177,6 +180,7 @@ main()
     console.error('❌ Seed error:', e);
     process.exit(1);
   })
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   .finally(async () => {
     await prisma.$disconnect();
   });
