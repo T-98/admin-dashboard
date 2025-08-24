@@ -2,7 +2,7 @@
 import { Injectable } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
 import type { estypes } from '@elastic/elasticsearch';
-import { Role, TeamRole } from '@prisma/client';
+import { InviteStatus, Role, TeamRole } from '@prisma/client';
 import { UserSearchDto } from './dto/user-search.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -11,6 +11,13 @@ type UserDoc = {
   name: string | null;
   email: string;
   createdAt: string; // ISO string stored in ES
+};
+
+type MinimalInvite = {
+  organizationId: number;
+  teamId: number | null;
+  status: InviteStatus;
+  invitedUserId: number | null;
 };
 
 @Injectable()
@@ -102,7 +109,8 @@ export class UserSearchService {
 
     const must: estypes.QueryDslQueryContainer[] = [];
 
-    // 🧊 Invite status filter (via DB)
+    // 🧊 Filter by invite status (via DB)
+    let inviteUserIds: number[] = [];
     if (inviteStatus) {
       const invites = await this.prismaService.invite.findMany({
         where: {
@@ -112,18 +120,18 @@ export class UserSearchService {
         select: { invitedUserId: true },
       });
 
-      const invitedUserIds = invites
+      inviteUserIds = invites
         .map((i) => i.invitedUserId)
         .filter((id): id is number => id !== null);
 
-      if (invitedUserIds.length === 0) {
+      if (inviteUserIds.length === 0) {
         return { users: [], nextCursor: null, hasMore: false, total: 0 };
       }
 
-      must.push({ terms: { id: invitedUserIds } });
+      must.push({ terms: { id: inviteUserIds } });
     }
 
-    // 🏢 Filter by organization name (case-insensitive match)
+    // 🏢 Filter by org name
     if (organizationName) {
       must.push({
         terms: {
@@ -132,7 +140,7 @@ export class UserSearchService {
       });
     }
 
-    // 👥 Filter by team name (case-insensitive match)
+    // 👥 Filter by team name
     if (teamName) {
       must.push({
         terms: {
@@ -141,7 +149,7 @@ export class UserSearchService {
       });
     }
 
-    // 🧭 Query + Sort
+    // 🧭 Main query + sort logic
     let query: estypes.QueryDslQueryContainer;
     let sort: estypes.SortCombinations[];
 
@@ -226,7 +234,7 @@ export class UserSearchService {
 
     const userIds = users.map((u) => u.id);
 
-    // 🔗 Enrich with org data
+    // 🔗 Memberships
     const orgMemberships = await this.prismaService.userOrganization.findMany({
       where: { userId: { in: userIds } },
       select: {
@@ -237,20 +245,6 @@ export class UserSearchService {
       },
     });
 
-    const orgMap: Record<
-      number,
-      { orgId: number; name: string; role: Role }[]
-    > = {};
-    for (const m of orgMemberships) {
-      if (!orgMap[m.userId]) orgMap[m.userId] = [];
-      orgMap[m.userId].push({
-        orgId: m.organizationId,
-        name: m.organization.name,
-        role: m.role,
-      });
-    }
-
-    // 🔗 Enrich with team data
     const teamMemberships = await this.prismaService.teamMember.findMany({
       where: { userId: { in: userIds } },
       select: {
@@ -266,18 +260,102 @@ export class UserSearchService {
       },
     });
 
+    // 🎟️ Pending invites
+    const invites = await this.prismaService.invite.findMany({
+      where: {
+        invitedUserId: { in: userIds },
+      },
+      select: {
+        invitedUserId: true,
+        status: true,
+        organizationId: true,
+        teamId: true,
+      },
+    });
+
+    const inviteMap: Record<number, MinimalInvite[]> = {};
+    for (const i of invites) {
+      if (!inviteMap[i.invitedUserId!]) inviteMap[i.invitedUserId!] = [];
+      inviteMap[i.invitedUserId!].push(i);
+    }
+
+    const orgMap: Record<
+      number,
+      {
+        orgId: number;
+        name: string;
+        role: Role;
+        organizationInviteStatus?: InviteStatus;
+      }[]
+    > = {};
+
     const teamMap: Record<
       number,
-      { teamId: number; name: string; role: TeamRole; orgId: number }[]
+      {
+        teamId: number;
+        name: string;
+        role: TeamRole;
+        orgId: number;
+        teamInviteStatus?: InviteStatus;
+      }[]
     > = {};
-    for (const m of teamMemberships) {
-      if (!teamMap[m.userId]) teamMap[m.userId] = [];
-      teamMap[m.userId].push({
-        teamId: m.teamId,
-        name: m.team.name,
-        role: m.role,
-        orgId: m.team.organizationId,
+
+    for (const userId of userIds) {
+      // Org memberships
+      orgMap[userId] = (
+        orgMemberships.filter((m) => m.userId === userId) ?? []
+      ).map((m) => {
+        const matchingInvite = inviteMap[userId]?.find(
+          (i) => i.organizationId === m.organizationId && !i.teamId,
+        );
+        return {
+          orgId: m.organizationId,
+          name: m.organization.name,
+          role: m.role,
+          organizationInviteStatus: matchingInvite?.status,
+        };
       });
+
+      // If no org memberships, fallback to invites only
+      if (orgMap[userId].length === 0 && inviteMap[userId]) {
+        const orgInvites = inviteMap[userId].filter(
+          (i) => i.organizationId && !i.teamId,
+        );
+        orgMap[userId] = orgInvites.map((i) => ({
+          orgId: i.organizationId,
+          name: '', // You can optionally fetch org name if needed
+          role: 'MEMBER',
+          organizationInviteStatus: i.status,
+        }));
+      }
+
+      // Team memberships
+      teamMap[userId] = (
+        teamMemberships.filter((m) => m.userId === userId) ?? []
+      ).map((m) => {
+        const matchingInvite = inviteMap[userId]?.find(
+          (i) => i.teamId === m.teamId,
+        );
+        return {
+          teamId: m.teamId,
+          name: m.team.name,
+          role: m.role,
+          orgId: m.team.organizationId,
+          teamInviteStatus: matchingInvite?.status,
+        };
+      });
+
+      // If no team memberships, fallback to invites only
+      if (teamMap[userId].length === 0 && inviteMap[userId]) {
+        const teamInvites = inviteMap[userId].filter((i) => i.teamId);
+        teamMap[userId] = teamInvites.map((i) => ({
+          teamId: i.teamId!,
+          name: '', // Optionally fetch name
+          role: 'MEMBER',
+          orgId: i.organizationId,
+          teamInviteStatus: i.status,
+        }));
+      }
     }
 
     const enrichedUsers = users.map((u) => ({
