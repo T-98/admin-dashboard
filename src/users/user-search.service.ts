@@ -126,8 +126,8 @@ export class UserSearchService {
     // 🏢 Filter by organization name (case-insensitive match)
     if (organizationName) {
       must.push({
-        match_phrase_prefix: {
-          organizationNames: organizationName.toLowerCase(),
+        terms: {
+          'organizationNames.keyword': [organizationName],
         },
       });
     }
@@ -135,8 +135,8 @@ export class UserSearchService {
     // 👥 Filter by team name (case-insensitive match)
     if (teamName) {
       must.push({
-        match_phrase_prefix: {
-          teamNames: teamName.toLowerCase(),
+        terms: {
+          'teamNames.keyword': [teamName],
         },
       });
     }
