@@ -15,7 +15,9 @@ type UserDoc = {
 
 type MinimalInvite = {
   organizationId: number;
+  organizationName: string | null;
   teamId: number | null;
+  teamName: string | null;
   status: InviteStatus;
   invitedUserId: number | null;
 };
@@ -149,7 +151,7 @@ export class UserSearchService {
       });
     }
 
-    // 🧭 Main query + sort logic
+    // 🧭 Main query
     let query: estypes.QueryDslQueryContainer;
     let sort: estypes.SortCombinations[];
 
@@ -222,7 +224,7 @@ export class UserSearchService {
       }
     }
 
-    // 🔎 Search in Elasticsearch
+    // 🔍 Elasticsearch Search
     const result = await this.elasticsearchService.search<UserDoc>(params);
     const hits = result.hits.hits;
     const total =
@@ -234,7 +236,28 @@ export class UserSearchService {
 
     const userIds = users.map((u) => u.id);
 
-    // 🔗 Memberships
+    // 🎟️ Invites
+    const invites = await this.prismaService.invite.findMany({
+      where: {
+        invitedUserId: { in: userIds },
+      },
+      select: {
+        invitedUserId: true,
+        status: true,
+        organizationId: true,
+        organizationName: true,
+        teamId: true,
+        teamName: true,
+      },
+    });
+
+    const inviteMap: Record<number, MinimalInvite[]> = {};
+    for (const i of invites) {
+      if (!inviteMap[i.invitedUserId!]) inviteMap[i.invitedUserId!] = [];
+      inviteMap[i.invitedUserId!].push(i);
+    }
+
+    // 📎 Memberships
     const orgMemberships = await this.prismaService.userOrganization.findMany({
       where: { userId: { in: userIds } },
       select: {
@@ -260,102 +283,70 @@ export class UserSearchService {
       },
     });
 
-    // 🎟️ Pending invites
-    const invites = await this.prismaService.invite.findMany({
-      where: {
-        invitedUserId: { in: userIds },
-      },
-      select: {
-        invitedUserId: true,
-        status: true,
-        organizationId: true,
-        teamId: true,
-      },
-    });
-
-    const inviteMap: Record<number, MinimalInvite[]> = {};
-    for (const i of invites) {
-      if (!inviteMap[i.invitedUserId!]) inviteMap[i.invitedUserId!] = [];
-      inviteMap[i.invitedUserId!].push(i);
-    }
-
-    const orgMap: Record<
-      number,
-      {
-        orgId: number;
-        name: string;
-        role: Role;
-        organizationInviteStatus?: InviteStatus;
-      }[]
-    > = {};
-
-    const teamMap: Record<
-      number,
-      {
-        teamId: number;
-        name: string;
-        role: TeamRole;
-        orgId: number;
-        teamInviteStatus?: InviteStatus;
-      }[]
-    > = {};
+    // 🧠 Enrich per user
+    const orgMap: Record<number, any[]> = {};
+    const teamMap: Record<number, any[]> = {};
 
     for (const userId of userIds) {
-      // Org memberships
-      orgMap[userId] = (
-        orgMemberships.filter((m) => m.userId === userId) ?? []
-      ).map((m) => {
-        const matchingInvite = inviteMap[userId]?.find(
-          (i) => i.organizationId === m.organizationId && !i.teamId,
-        );
-        return {
+      const orgs: any[] = [];
+      const teams: any[] = [];
+
+      // ✅ Add org memberships
+      for (const m of orgMemberships.filter((m) => m.userId === userId)) {
+        orgs.push({
           orgId: m.organizationId,
           name: m.organization.name,
           role: m.role,
-          organizationInviteStatus: matchingInvite?.status,
-        };
-      });
+          organizationInviteStatus: inviteMap[userId]?.find(
+            (i) => i.organizationId === m.organizationId && !i.teamId,
+          )?.status,
+        });
+      }
 
-      // If no org memberships, fallback to invites only
-      if (orgMap[userId].length === 0 && inviteMap[userId]) {
+      // ✅ Fallback: invite-only orgs
+      if (orgs.length === 0 && inviteMap[userId]) {
         const orgInvites = inviteMap[userId].filter(
           (i) => i.organizationId && !i.teamId,
         );
-        orgMap[userId] = orgInvites.map((i) => ({
-          orgId: i.organizationId,
-          name: '', // You can optionally fetch org name if needed
-          role: 'MEMBER',
-          organizationInviteStatus: i.status,
-        }));
+        for (const i of orgInvites) {
+          orgs.push({
+            orgId: i.organizationId,
+            name: i.organizationName,
+            role: undefined,
+            organizationInviteStatus: i.status,
+          });
+        }
       }
 
-      // Team memberships
-      teamMap[userId] = (
-        teamMemberships.filter((m) => m.userId === userId) ?? []
-      ).map((m) => {
-        const matchingInvite = inviteMap[userId]?.find(
-          (i) => i.teamId === m.teamId,
-        );
-        return {
+      // ✅ Add team memberships
+      for (const m of teamMemberships.filter((m) => m.userId === userId)) {
+        teams.push({
           teamId: m.teamId,
           name: m.team.name,
           role: m.role,
           orgId: m.team.organizationId,
-          teamInviteStatus: matchingInvite?.status,
-        };
-      });
-
-      // If no team memberships, fallback to invites only
-      if (teamMap[userId].length === 0 && inviteMap[userId]) {
-        const teamInvites = inviteMap[userId].filter((i) => i.teamId);
-        teamMap[userId] = teamInvites.map((i) => ({
-          teamId: i.teamId!,
-          name: '', // Optionally fetch name
-          role: 'MEMBER',
-          orgId: i.organizationId,
-          teamInviteStatus: i.status,
-        }));
+          teamInviteStatus: inviteMap[userId]?.find(
+            (i) => i.teamId === m.teamId,
+          )?.status,
+        });
       }
+
+      // ✅ Fallback: invite-only teams
+      if (teams.length === 0 && inviteMap[userId]) {
+        const teamInvites = inviteMap[userId].filter((i) => i.teamId);
+        for (const i of teamInvites) {
+          teams.push({
+            teamId: i.teamId!,
+            name: i.teamName ?? '',
+            role: undefined,
+            orgId: i.organizationId,
+            teamInviteStatus: i.status,
+          });
+        }
+      }
+
+      orgMap[userId] = orgs;
+      teamMap[userId] = teams;
     }
 
     const enrichedUsers = users.map((u) => ({
