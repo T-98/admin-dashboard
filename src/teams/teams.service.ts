@@ -1,6 +1,7 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateTeamDto } from './dto/create-team.dto';
+import { TeamRole } from '@prisma/client';
 
 @Injectable()
 export class TeamsService {
@@ -31,5 +32,28 @@ export class TeamsService {
     });
 
     return team;
+  }
+
+  async getTeamsByUser(userId: number): Promise<
+    {
+      teamId: number;
+      role: TeamRole;
+      team: {
+        name: string;
+      };
+    }[]
+  > {
+    return this.prisma.teamMember.findMany({
+      where: { userId: userId },
+      select: {
+        teamId: true,
+        role: true,
+        team: {
+          select: {
+            name: true,
+          },
+        },
+      },
+    });
   }
 }

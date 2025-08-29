@@ -11,6 +11,7 @@ import { TeamsModule } from './teams/teams.module';
 import * as Joi from 'joi';
 import { TeamsService } from './teams/teams.service';
 import { InvitesModule } from './invites/invites.module';
+import { OrganizationsModule } from './organizations/organizations.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { InvitesModule } from './invites/invites.module';
     CustomElasticsearchModule,
     TeamsModule,
     InvitesModule,
+    OrganizationsModule,
   ],
   controllers: [AppController],
   providers: [AppService, UsersService, TeamsService],

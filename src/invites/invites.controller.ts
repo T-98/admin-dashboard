@@ -57,13 +57,13 @@ export class InvitesController {
 
   @Post('accept')
   async acceptInvite(
-    @Body() dto: AcceptInviteDto,
+    @Body() acceptInviteDto: AcceptInviteDto,
     @Headers('x-email') email: string,
     @Headers('x-password') password: string,
   ) {
     if (!email || !password)
       throw new UnauthorizedException('Missing credentials');
     const user = await authenticateUser(this.prismaService, email, password);
-    return this.invitesService.acceptInvite(user.id, dto);
+    return this.invitesService.acceptInvite(user.id, acceptInviteDto);
   }
 }
