@@ -263,6 +263,7 @@ export class UserSearchService {
       const teams: any[] = [];
 
       const orgIdsSeen = new Set<number>();
+      const teamIdsSeen = new Set<number>();
 
       for (const m of orgMemberships.filter((m) => m.userId === userId)) {
         orgs.push({
@@ -276,7 +277,6 @@ export class UserSearchService {
         orgIdsSeen.add(m.organizationId);
       }
 
-      // 🧩 Add pending invites even if user has org memberships
       const extraOrgInvites = (inviteMap[userId] ?? []).filter(
         (i) =>
           i.organizationId && !i.teamId && !orgIdsSeen.has(i.organizationId),
@@ -301,19 +301,21 @@ export class UserSearchService {
             (i) => i.teamId === m.teamId,
           )?.status,
         });
+        teamIdsSeen.add(m.teamId);
       }
 
-      if (teams.length === 0 && inviteMap[userId]) {
-        const teamInvites = inviteMap[userId].filter((i) => i.teamId);
-        for (const i of teamInvites) {
-          teams.push({
-            teamId: i.teamId!,
-            name: i.teamName ?? '',
-            role: undefined,
-            orgId: i.organizationId,
-            teamInviteStatus: i.status,
-          });
-        }
+      const extraTeamInvites = (inviteMap[userId] ?? []).filter(
+        (i) => i.teamId && !teamIdsSeen.has(i.teamId),
+      );
+
+      for (const i of extraTeamInvites) {
+        teams.push({
+          teamId: i.teamId!,
+          name: i.teamName ?? '',
+          role: undefined,
+          orgId: i.organizationId,
+          teamInviteStatus: i.status,
+        });
       }
 
       orgMap[userId] = orgs;
