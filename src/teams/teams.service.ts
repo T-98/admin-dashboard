@@ -51,6 +51,7 @@ export class TeamsService {
         team: {
           select: {
             name: true,
+            organizationId: true,
           },
         },
       },
