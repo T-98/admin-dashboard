@@ -113,7 +113,6 @@ export class UserSearchService {
     let inviteUserIds: number[] = [];
     let allInvites: MinimalInvite[] = [];
 
-    // 🧊 Optional invite filtering
     if (inviteStatus) {
       allInvites = await this.prismaService.invite.findMany({
         where: {
@@ -251,7 +250,7 @@ export class UserSearchService {
       inviteMap.get(i.invitedUserId!)!.push(i);
     }
 
-    // 🧠 Group org and team memberships
+    // 🧠 Group org and team memberships into maps
     const [orgMemberships, teamMemberships] = await Promise.all([
       this.prismaService.userOrganization.findMany({
         where: { userId: { in: userIds } },
@@ -278,18 +277,30 @@ export class UserSearchService {
       }),
     ]);
 
-    const orgMap: Record<number, any[]> = {};
-    const teamMap: Record<number, any[]> = {};
+    const orgMembershipMap = new Map<number, typeof orgMemberships>();
+    const teamMembershipMap = new Map<number, typeof teamMemberships>();
 
-    for (const userId of userIds) {
+    for (const m of orgMemberships) {
+      if (!orgMembershipMap.has(m.userId)) orgMembershipMap.set(m.userId, []);
+      orgMembershipMap.get(m.userId)!.push(m);
+    }
+
+    for (const m of teamMemberships) {
+      if (!teamMembershipMap.has(m.userId)) teamMembershipMap.set(m.userId, []);
+      teamMembershipMap.get(m.userId)!.push(m);
+    }
+
+    const enrichedUsers = users.map((u) => {
       const orgs: any[] = [];
       const teams: any[] = [];
 
       const orgIdsSeen = new Set<number>();
       const teamIdsSeen = new Set<number>();
-      const userInvites = inviteMap.get(userId) ?? [];
+      const userInvites = inviteMap.get(u.id) ?? [];
+      const userOrgMemberships = orgMembershipMap.get(u.id) ?? [];
+      const userTeamMemberships = teamMembershipMap.get(u.id) ?? [];
 
-      for (const m of orgMemberships.filter((m) => m.userId === userId)) {
+      for (const m of userOrgMemberships) {
         orgs.push({
           orgId: m.organizationId,
           name: m.organization.name,
@@ -316,7 +327,7 @@ export class UserSearchService {
         }
       }
 
-      for (const m of teamMemberships.filter((m) => m.userId === userId)) {
+      for (const m of userTeamMemberships) {
         teams.push({
           teamId: m.teamId,
           name: m.team.name,
@@ -340,21 +351,16 @@ export class UserSearchService {
         }
       }
 
-      orgMap[userId] = orgs;
-      teamMap[userId] = teams;
-    }
-
-    const enrichedUsers = users.map((u) => ({
-      ...u,
-      orgs: orgMap[u.id] ?? [],
-      teams: teamMap[u.id] ?? [],
-    }));
+      return {
+        ...u,
+        orgs,
+        teams,
+      };
+    });
 
     const lastHit = hits[hits.length - 1];
     const nextCursor =
-      hits.length > 0 &&
-      lastHit?.sort?.length &&
-      users.length + (encodedCursor ? size : 0) < total
+      hits.length === size && lastHit?.sort?.length
         ? Buffer.from(JSON.stringify(lastHit.sort)).toString('base64')
         : null;
 

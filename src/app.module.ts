@@ -12,6 +12,7 @@ import * as Joi from 'joi';
 import { TeamsService } from './teams/teams.service';
 import { InvitesModule } from './invites/invites.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { RedisCacheModule } from './cache/cache.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
     TeamsModule,
     InvitesModule,
     OrganizationsModule,
+    RedisCacheModule,
   ],
   controllers: [AppController],
   providers: [AppService, UsersService, TeamsService],
