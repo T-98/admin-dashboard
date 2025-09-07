@@ -169,27 +169,105 @@ export class UserSearchService {
       sort = [{ _score: { order: 'desc' } }, { id: { order: 'desc' } }];
     } else {
       if (q) {
-        must.push({
-          bool: {
-            should: [
-              {
-                prefix: {
-                  name: { value: q.toLowerCase(), case_insensitive: true },
+        const isFuzzySearch = q.length >= 3;
+        const fuzzyField =
+          sortBy === 'email' || sortBy === 'name' ? sortBy : null;
+
+        if (isFuzzySearch) {
+          const fuzzyOrPrefix = fuzzyField
+            ? [
+                {
+                  fuzzy: {
+                    [fuzzyField]: {
+                      value: q.toLowerCase(),
+                      fuzziness: 'AUTO',
+                      max_expansions: 50,
+                      transpositions: true,
+                    },
+                  },
+                },
+                {
+                  prefix: {
+                    [fuzzyField]: {
+                      value: q.toLowerCase(),
+                      case_insensitive: true,
+                    },
+                  },
+                },
+              ]
+            : [
+                {
+                  fuzzy: {
+                    name: {
+                      value: q.toLowerCase(),
+                      fuzziness: 'AUTO',
+                      max_expansions: 50,
+                      transpositions: true,
+                    },
+                  },
+                },
+                {
+                  fuzzy: {
+                    email: {
+                      value: q.toLowerCase(),
+                      fuzziness: 'AUTO',
+                      max_expansions: 50,
+                      transpositions: true,
+                    },
+                  },
+                },
+                {
+                  prefix: {
+                    name: { value: q.toLowerCase(), case_insensitive: true },
+                  },
+                },
+                {
+                  prefix: {
+                    email: { value: q.toLowerCase(), case_insensitive: true },
+                  },
+                },
+              ];
+
+          must.push({
+            bool: {
+              should: fuzzyOrPrefix,
+            },
+          });
+        } else {
+          if (fuzzyField) {
+            must.push({
+              prefix: {
+                [fuzzyField]: {
+                  value: q.toLowerCase(),
+                  case_insensitive: true,
                 },
               },
-              {
-                prefix: {
-                  email: { value: q.toLowerCase(), case_insensitive: true },
-                },
+            });
+          } else {
+            must.push({
+              bool: {
+                should: [
+                  {
+                    prefix: {
+                      name: { value: q.toLowerCase(), case_insensitive: true },
+                    },
+                  },
+                  {
+                    prefix: {
+                      email: { value: q.toLowerCase(), case_insensitive: true },
+                    },
+                  },
+                ],
               },
-            ],
-          },
-        });
+            });
+          }
+        }
       }
 
       const sortField = ['name', 'email'].includes(sortBy)
         ? `${sortBy}.keyword`
         : sortBy;
+
       sort = [{ [sortField]: order }, { id: order }];
       query = must.length > 0 ? { bool: { must } } : { match_all: {} };
     }
@@ -228,7 +306,6 @@ export class UserSearchService {
       .filter((s): s is UserDoc => Boolean(s));
     const userIds = users.map((u) => u.id);
 
-    // 🔄 Fetch all invites if not already fetched
     if (!allInvites.length) {
       allInvites = await this.prismaService.invite.findMany({
         where: { invitedUserId: { in: userIds } },
@@ -243,14 +320,12 @@ export class UserSearchService {
       });
     }
 
-    // 🧠 Group invites by userId
     const inviteMap = new Map<number, MinimalInvite[]>();
     for (const i of allInvites) {
       if (!inviteMap.has(i.invitedUserId!)) inviteMap.set(i.invitedUserId!, []);
       inviteMap.get(i.invitedUserId!)!.push(i);
     }
 
-    // 🧠 Group org and team memberships into maps
     const [orgMemberships, teamMemberships] = await Promise.all([
       this.prismaService.userOrganization.findMany({
         where: { userId: { in: userIds } },
