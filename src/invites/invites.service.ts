@@ -29,8 +29,13 @@ export class InvitesService {
         invitedUserId: { in: userIds },
       },
       select: {
+        id: true,
         invitedUserId: true,
         organizationId: true,
+        organizationName: true,
+        orgRole: true,
+        teamRole: true,
+        teamName: true,
         status: true,
         teamId: true,
         createdAt: true,

@@ -10,5 +10,18 @@ services:
     volumes:
       - esdata:/usr/share/elasticsearch/data
 
+  admin-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production  # Or 'development'
+    ports:
+      - '3000:3000'
+    depends_on:
+      - elasticsearch
+    environment:
+      - NODE_ENV=production
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+
 volumes:
   esdata:
